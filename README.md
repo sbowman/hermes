@@ -1,6 +1,8 @@
 # Hermes 
 
-Hermes wraps the `database/sql` DB and Tx models in a common interface.
+Hermes wraps the `jmoiron/sqlx` *sqlx.DB and *sqlx.Tx models in a common 
+interface, hermes.Conn.  Makes it easier to build small functions that can
+be aggregated and used in a single transaction, as well as for testing.
 
 ## Usage
 
@@ -9,7 +11,10 @@ Hermes wraps the `database/sql` DB and Tx models in a common interface.
         if err != nil {
             return err
         }
-        defer tx.Close()
+        
+        // Will automatically rollback if an error short-circuits the return
+        // before tx.Commit() is called...
+        defer tx.Close() 
 
         res, err := conn.Exec("insert into samples (name) values ($1)", name)
         if err != nil {
@@ -40,7 +45,9 @@ Hermes wraps the `database/sql` DB and Tx models in a common interface.
         if err != nil {
             panic(err)
         }
-        defer tx.Close()
+
+        // Will automatically rollback if call to sample fails...
+        defer tx.Close() 
 
         if err := Sample(tx, "Frank"); err != nil {
             fmt.Println("Frank failed!", err.Error())
@@ -48,12 +55,6 @@ Hermes wraps the `database/sql` DB and Tx models in a common interface.
         }
 
         // Don't forget to commit, or you'll automatically rollback on 
-        // tx.Close()!
+        // "defer tx.Close()" above!
         tx.Commit() 
     }
-
-## Testing
-
-To run the test cases, create a `hermes_test` database before running the tests.
-If a test fails, there is a chance data will remain in the database, but 
-typically the database should be empty when all tests are complete.

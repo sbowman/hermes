@@ -4,6 +4,9 @@ Hermes wraps the `jmoiron/sqlx` *sqlx.DB and *sqlx.Tx models in a common
 interface, hermes.Conn.  Makes it easier to build small functions that can
 be aggregated and used in a single transaction, as well as for testing.
 
+[![Godoc](http://img.shields.io/badge/godoc-reference-blue.svg?style=flat)](https://godoc.org/github.com/sbowman/hermes) 
+[![license](http://img.shields.io/badge/license-MIT-red.svg?style=flat)]
+
 ## Usage
 
     func Sample(conn hermes.Conn, name string) error {

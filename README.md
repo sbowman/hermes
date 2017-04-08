@@ -58,3 +58,18 @@ be aggregated and used in a single transaction, as well as for testing.
         // "defer tx.Close()" above!
         tx.Commit() 
     }
+
+## Testing
+
+Testing requires the lib/pq library, a PostgreSQL database, and a test database
+called "hermes_test".
+
+(A future release may mock a database driver.)
+
+### On a Mac...
+
+$ brew install postgresql
+$ createdb hermes_test
+$ cd $GOPATH/src/github.com/sbowman/hermes
+$ go get
+$ go test

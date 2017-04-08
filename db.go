@@ -115,3 +115,8 @@ func (db *DB) Rollback() error {
 func (db *DB) Close() error {
 	return db.internal.Close()
 }
+
+// RolledBack always returns false.
+func (db *DB) RolledBack() bool {
+	return false
+}

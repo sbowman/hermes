@@ -56,6 +56,9 @@ type Conn interface {
 	// Close rolls back a transaction (and all its parent transactions) if
 	// it hasn't been committed.  Useful in a defer.
 	Close() error
+
+	// Is this connection in a rollback state?
+	RolledBack() bool
 }
 
 // Connect opens a connection to the database and pings it.

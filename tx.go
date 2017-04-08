@@ -13,24 +13,19 @@ var (
 	// ErrBadContext returned when the caller attempts to reset the context.
 	ErrBadContext = errors.New("Context mismatch")
 
-	// ErrTxFailed returned by calls to the transaction if it's in a failed
-	// state.
-	ErrTxFailed = errors.New("Transaction failed")
-
 	// ErrTxRolledBack returned by calls to the transaction if it has been
 	// rolled back.
 	ErrTxRolledBack = errors.New("Transaction rolled back")
 
-	// ErrAlreadyCommitted returned if the caller tries to rollback then
+	// ErrTxCommitted returned if the caller tries to rollback then
 	// commit a transaction in the same function.
-	ErrAlreadyCommitted = errors.New("Already committed")
+	ErrTxCommitted = errors.New("Already committed")
 )
 
 const (
-	pending = iota
-	rollback
-	commit
-	failed
+	_pending = iota
+	_rollback
+	_commit
 )
 
 // Tx wraps a sqlx.Tx transaction.  Tracks context.
@@ -44,8 +39,7 @@ type Tx struct {
 	current int   // current state
 	history []int // past states
 
-	rollback bool  // is the transaction being rolled back?
-	failure  error // if a call fails
+	rollback bool // is the transaction being rolled back?
 }
 
 // DB returns the base database connection.
@@ -88,7 +82,6 @@ func (tx *Tx) BeginCtx(ctx context.Context) (Conn, error) {
 	}
 
 	if tx.ctx != nil && tx.ctx != ctx {
-		tx.failure = ErrBadContext
 		return nil, ErrBadContext
 	}
 
@@ -100,10 +93,11 @@ func (tx *Tx) BeginCtx(ctx context.Context) (Conn, error) {
 
 // Exec executes a database statement with no results..
 func (tx *Tx) Exec(query string, args ...interface{}) (sql.Result, error) {
-	if tx.failure != nil {
-		return nil, ErrTxFailed
-	} else if tx.rollback {
-		return nil, ErrTxRolledBack
+	tx.Lock()
+	defer tx.Unlock()
+
+	if err := tx.ok(); err != nil {
+		return nil, err
 	}
 
 	if tx.ctx != nil {
@@ -115,10 +109,11 @@ func (tx *Tx) Exec(query string, args ...interface{}) (sql.Result, error) {
 
 // Query the databsae.
 func (tx *Tx) Query(query string, args ...interface{}) (*sqlx.Rows, error) {
-	if tx.failure != nil {
-		return nil, ErrTxFailed
-	} else if tx.rollback {
-		return nil, ErrTxRolledBack
+	tx.Lock()
+	defer tx.Unlock()
+
+	if err := tx.ok(); err != nil {
+		return nil, err
 	}
 
 	if tx.ctx != nil {
@@ -130,10 +125,11 @@ func (tx *Tx) Query(query string, args ...interface{}) (*sqlx.Rows, error) {
 
 // Row queries the databsae for a single row.
 func (tx *Tx) Row(query string, args ...interface{}) (*sqlx.Row, error) {
-	if tx.failure != nil {
-		return nil, ErrTxFailed
-	} else if tx.rollback {
-		return nil, ErrTxRolledBack
+	tx.Lock()
+	defer tx.Unlock()
+
+	if err := tx.ok(); err != nil {
+		return nil, err
 	}
 
 	if tx.ctx != nil {
@@ -145,10 +141,11 @@ func (tx *Tx) Row(query string, args ...interface{}) (*sqlx.Row, error) {
 
 // Prepare a database query.
 func (tx *Tx) Prepare(query string) (*sqlx.Stmt, error) {
-	if tx.failure != nil {
-		return nil, ErrTxFailed
-	} else if tx.rollback {
-		return nil, ErrTxRolledBack
+	tx.Lock()
+	defer tx.Unlock()
+
+	if err := tx.ok(); err != nil {
+		return nil, err
 	}
 
 	// TODO:  No PreparexContext?
@@ -162,10 +159,11 @@ func (tx *Tx) Prepare(query string) (*sqlx.Stmt, error) {
 
 // Get a single record from the database, e.g. "SELECT ... LIMIT 1".
 func (tx *Tx) Get(dest interface{}, query string, args ...interface{}) error {
-	if tx.failure != nil {
-		return ErrTxFailed
-	} else if tx.rollback {
-		return ErrTxRolledBack
+	tx.Lock()
+	defer tx.Unlock()
+
+	if err := tx.ok(); err != nil {
+		return err
 	}
 
 	if tx.ctx != nil {
@@ -177,10 +175,11 @@ func (tx *Tx) Get(dest interface{}, query string, args ...interface{}) error {
 
 // Select a collection record from the database.
 func (tx *Tx) Select(dest interface{}, query string, args ...interface{}) error {
-	if tx.failure != nil {
-		return ErrTxFailed
-	} else if tx.rollback {
-		return ErrTxRolledBack
+	tx.Lock()
+	defer tx.Unlock()
+
+	if err := tx.ok(); err != nil {
+		return err
 	}
 
 	if tx.ctx != nil {
@@ -190,30 +189,9 @@ func (tx *Tx) Select(dest interface{}, query string, args ...interface{}) error 
 	return tx.internal.Select(dest, query, args...)
 }
 
-// Commit the current transaction.  If this is a child transaction,
+// Commit the current transaction.  Returns ErrTxRolledBack if the transaction
+// was already rolled back, or ErrTxCommitted if it was committed.
 func (tx *Tx) Commit() error {
-	tx.Lock()
-	defer tx.Lock()
-
-	if tx.rollback || tx.current == rollback {
-		return ErrTxRolledBack
-	}
-
-	if len(tx.history) == 0 {
-		if err := tx.internal.Commit(); err != nil {
-			tx.failure = err
-			tx.current = failed
-			return err
-		}
-	}
-
-	tx.current = commit
-
-	return nil
-}
-
-// Rollback does nothing in a raw connection.
-func (tx *Tx) Rollback() error {
 	tx.Lock()
 	defer tx.Unlock()
 
@@ -221,17 +199,40 @@ func (tx *Tx) Rollback() error {
 		return ErrTxRolledBack
 	}
 
-	if tx.current == commit {
-		return ErrAlreadyCommitted
+	if tx.current == _commit {
+		return ErrTxCommitted
+	}
+
+	if len(tx.history) == 0 {
+		if err := tx.internal.Commit(); err != nil {
+			return err
+		}
+	}
+
+	tx.current = _commit
+
+	return nil
+}
+
+// Rollback the transaction.  Ignored if the transaction is already in a
+// rollback.  Returns ErrTxCommitted if the transaction was committed.
+func (tx *Tx) Rollback() error {
+	tx.Lock()
+	defer tx.Unlock()
+
+	if tx.rollback {
+		return nil
+	}
+
+	if tx.current == _commit {
+		return ErrTxCommitted
 	}
 
 	if err := tx.internal.Rollback(); err != nil {
-		tx.failure = err
-		tx.pop()
 		return err
 	}
 
-	tx.current = rollback
+	tx.current = _rollback
 	tx.rollback = true
 	tx.pop()
 
@@ -243,27 +244,44 @@ func (tx *Tx) Close() error {
 	tx.Lock()
 	defer tx.Unlock()
 
-	if tx.rollback || tx.current == commit {
+	if tx.current == _rollback || tx.current == _commit {
 		tx.pop()
 		return nil
 	}
 
 	if err := tx.internal.Rollback(); err != nil {
-		tx.failure = err
 		tx.pop()
 		return err
 	}
 
-	tx.current = rollback
+	tx.current = _rollback
 	tx.rollback = true
 	tx.pop()
 
 	return nil
 }
 
+// RolledBack returns true if the transaction was rolled back.
+func (tx *Tx) RolledBack() bool {
+	return tx.rollback
+}
+
+// Confirm the transaction is viable before executing a query.
+func (tx *Tx) ok() error {
+	if tx.rollback {
+		return ErrTxRolledBack
+	}
+
+	if tx.current == _commit {
+		return ErrTxCommitted
+	}
+
+	return nil
+}
+
 func (tx *Tx) push() {
 	tx.history = append(tx.history, tx.current)
-	tx.current = pending
+	tx.current = _pending
 }
 
 func (tx *Tx) pop() {

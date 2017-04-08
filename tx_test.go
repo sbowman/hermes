@@ -3,6 +3,8 @@ package hermes_test
 import (
 	"database/sql"
 	"testing"
+
+	"github.com/sbowman/hermes"
 )
 
 func TestTransaction(t *testing.T) {
@@ -20,6 +22,7 @@ func TestTransaction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Unable to start transaction :%s", err)
 	}
+	// see tx.Close() below
 
 	if _, err := tx.Exec("insert into test_tx values ($1)", "Sphinx"); err != nil {
 		t.Errorf("Unable to insert via transaction: %s", err)
@@ -58,9 +61,274 @@ func TestTransaction(t *testing.T) {
 }
 
 func TestDeepRollback(t *testing.T) {
+	db := connect(t)
+	defer db.Close()
 
+	if _, err := db.Exec("create table test_deep_r(wonder varchar(64))"); err != nil {
+		t.Fatalf("Unable to create test_deep_r table: %s", err)
+	}
+	defer func() {
+		db.Exec("drop table test_deep_r")
+	}()
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Unable to start transaction :%s", err)
+	}
+	// no defer; see tx.Close() below...
+
+	if _, err := tx.Exec("insert into test_deep_r values ($1)", "Mahogany"); err != nil {
+		t.Errorf("Unable to insert via transaction: %s", err)
+	}
+
+	err = func(conn hermes.Conn) error {
+		txn, err := conn.Begin()
+		if err != nil {
+			return err
+		}
+		defer txn.Close()
+
+		if _, err = txn.Exec("insert into test_deep_r values ($1)", "Oak"); err != nil {
+			return err
+		}
+
+		txn.Rollback()
+		return nil
+	}(tx)
+
+	if err != nil {
+		t.Fatalf("Deep tx failed unexpectedly: %s", err)
+	}
+
+	if !tx.RolledBack() {
+		t.Error("Expected transaction to indicate it was rolled back")
+	}
+
+	_, err = tx.Query("select wonder from test_deep_r")
+	if err != hermes.ErrTxRolledBack {
+		t.Errorf(`Expected error "%s"; got "%s"`, hermes.ErrTxRolledBack, err)
+	}
+
+	if err := tx.Commit(); err != hermes.ErrTxRolledBack {
+		t.Errorf("Expected rolled back error")
+	}
+
+	if err := tx.Rollback(); err != nil {
+		t.Errorf("Unexpected error from rollback: %s", err)
+	}
+
+	tx.Close()
+
+	rows, _ := db.Query("select wonder from test_deep_r")
+	if rows.Next() {
+		t.Error("Unexpected results; was table cleared?")
+	}
 }
 
 func TestDeepCommit(t *testing.T) {
+	db := connect(t)
+	defer db.Close()
 
+	if _, err := db.Exec("create table test_deep_c(wonder varchar(64))"); err != nil {
+		t.Fatalf("Unable to create test_deep_c table: %s", err)
+	}
+	defer func() {
+		db.Exec("drop table test_deep_c")
+	}()
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Unable to start transaction :%s", err)
+	}
+	defer tx.Close()
+
+	if _, err := tx.Exec("insert into test_deep_c values ($1)", "Mahogany"); err != nil {
+		t.Errorf("Unable to insert via transaction: %s", err)
+	}
+
+	err = func(conn hermes.Conn) error {
+		txn, err := conn.Begin()
+		if err != nil {
+			return err
+		}
+		defer txn.Close()
+
+		if _, err = txn.Exec("insert into test_deep_c values ($1)", "Oak"); err != nil {
+			return err
+		}
+
+		txn.Commit()
+		return nil
+	}(tx)
+
+	if err != nil {
+		t.Fatalf("Deep tx failed: %s", err)
+	}
+
+	rows, err := tx.Query("select wonder from test_deep_c")
+	if err != nil {
+		t.Fatalf("Failed to query database: %s", err)
+	}
+
+	var counter int
+	for rows.Next() {
+		var w string
+		if err := rows.Scan(&w); err != nil {
+			t.Errorf("Unable to load wonder value: %s", err)
+			continue
+		}
+
+		if w == "Mahogany" || w == "Oak" {
+			counter++
+		} else {
+			t.Errorf("Unexpected value, %s", w)
+		}
+	}
+
+	if counter != 2 {
+		t.Error("Didn't find the expected values!")
+	}
+}
+
+func TestMultipleCommit(t *testing.T) {
+	db := connect(t)
+	defer db.Close()
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Unable to start transaction :%s", err)
+	}
+	defer tx.Close()
+
+	tx.Exec("select 1")
+
+	if err := tx.Commit(); err != nil {
+		t.Error(err)
+	}
+
+	if err := tx.Commit(); err != hermes.ErrTxCommitted {
+		t.Error("Expected error already committed on second commit")
+	}
+
+	if err := tx.Rollback(); err != hermes.ErrTxCommitted {
+		t.Error("Expected error already committed on rollback")
+	}
+}
+
+func TestMultipleRollback(t *testing.T) {
+	db := connect(t)
+	defer db.Close()
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Unable to start transaction :%s", err)
+	}
+	defer tx.Close()
+
+	tx.Exec("select 1")
+
+	if err := tx.Rollback(); err != nil {
+		t.Error(err)
+	}
+
+	if err := tx.Rollback(); err != nil {
+		t.Errorf("Unexpected error on second rollback: %s", err)
+	}
+
+	if err := tx.Commit(); err != hermes.ErrTxRolledBack {
+		t.Error("Expected error already rolled back")
+	}
+}
+
+func TestAutoRollback(t *testing.T) {
+	db := connect(t)
+	defer db.Close()
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Unable to start transaction :%s", err)
+	}
+
+	tx.Exec("select 1")
+
+	if err := tx.Close(); err != nil {
+		t.Error(err)
+	}
+
+	if !tx.RolledBack() {
+		t.Error("Expected to be rolled back")
+	}
+
+	if err := tx.Rollback(); err != nil {
+		t.Errorf("Unexpected error on second rollback: %s", err)
+	}
+
+	if err := tx.Commit(); err != hermes.ErrTxRolledBack {
+		t.Error("Expected error already rolled back")
+	}
+}
+
+func TestDeepAutoRollback(t *testing.T) {
+	db := connect(t)
+	defer db.Close()
+
+	if _, err := db.Exec("create table test_deep_ar(wonder varchar(64))"); err != nil {
+		t.Fatalf("Unable to create test_deep_ar table: %s", err)
+	}
+	defer func() {
+		db.Exec("drop table test_deep_ar")
+	}()
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Unable to start transaction :%s", err)
+	}
+	// no defer; see tx.Close() below...
+
+	if _, err := tx.Exec("insert into test_deep_ar values ($1)", "Peanuts"); err != nil {
+		t.Errorf("Unable to insert via transaction: %s", err)
+	}
+
+	err = func(conn hermes.Conn) error {
+		txn, err := conn.Begin()
+		if err != nil {
+			return err
+		}
+		defer txn.Close()
+
+		if _, err = txn.Exec("insert into test_deep_ar values ($1)", "Almonds"); err != nil {
+			return err
+		}
+
+		// NOTE: no commit; should auto-rollback...
+		return nil
+	}(tx)
+
+	if err != nil {
+		t.Fatalf("Deep tx failed unexpectedly: %s", err)
+	}
+
+	if !tx.RolledBack() {
+		t.Error("Expected transaction to indicate it was rolled back")
+	}
+
+	_, err = tx.Query("select wonder from test_deep_ar")
+	if err != hermes.ErrTxRolledBack {
+		t.Errorf(`Expected error "%s"; got "%s"`, hermes.ErrTxRolledBack, err)
+	}
+
+	if err := tx.Commit(); err != hermes.ErrTxRolledBack {
+		t.Errorf("Expected rolled back error")
+	}
+
+	if err := tx.Rollback(); err != nil {
+		t.Errorf("Unexpected error from rollback: %s", err)
+	}
+
+	tx.Close()
+
+	rows, _ := db.Query("select wonder from test_deep_ar")
+	if rows.Next() {
+		t.Error("Unexpected results; was table cleared?")
+	}
 }

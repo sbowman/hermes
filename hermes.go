@@ -1,3 +1,17 @@
+// Package hermes wraps the jmoiron/sqlx *sqlx.DB and *sqlx.Tx in a common
+// interface, hermes.Conn.
+//
+// Use hermes.Conn in functions to optionally support transactions in your
+// database queries.  It allows you to create database queries composed of
+// other functions without having to worry about whether or not you're working
+// off a database connection or an existing transaction.
+//
+// Additionally, testing with the database becomes easier.  Simply create a
+// transaction at the beginning of every test with a `defer tx.Close()`, pass
+// the transaction into your functions instead of the database connection,
+// and don't commit the transaction at the end.  Every database insert, select,
+// update, and delete will function normally in your test, then rollback and
+// clean out the database automatically at the end.
 package hermes
 
 import (

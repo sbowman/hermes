@@ -68,8 +68,8 @@ called "hermes_test".
 
 ### On a Mac...
 
-$ brew install postgresql
-$ createdb hermes_test
-$ cd $GOPATH/src/github.com/sbowman/hermes
-$ go get
-$ go test
+    $ brew install postgresql
+    $ createdb hermes_test
+    $ cd $GOPATH/src/github.com/sbowman/hermes
+    $ go get
+    $ go test

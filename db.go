@@ -9,6 +9,7 @@ import (
 
 // DB represents a database connection.  Implements the hermes.Conn interface.
 type DB struct {
+	name string
 	internal *sqlx.DB
 }
 
@@ -28,12 +29,12 @@ func (db *DB) Ping() error {
 }
 
 // DB returns the base database connection.
-func (db *DB) DB() *sqlx.DB {
+func (db *DB) BaseDB() *sqlx.DB {
 	return db.internal
 }
 
 // Tx returns nil.
-func (db *DB) Tx() *sqlx.Tx {
+func (db *DB) BaseTx() *sqlx.Tx {
 	return nil
 }
 
@@ -119,4 +120,9 @@ func (db *DB) Close() error {
 // RolledBack always returns false.
 func (db *DB) RolledBack() bool {
 	return false
+}
+
+// Name returns the datasource name for this connection
+func (db *DB) Name() string {
+	return db.name
 }

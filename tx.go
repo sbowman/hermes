@@ -43,12 +43,12 @@ type Tx struct {
 }
 
 // DB returns the base database connection.
-func (tx *Tx) DB() *sqlx.DB {
-	return tx.db.DB()
+func (tx *Tx) BaseDB() *sqlx.DB {
+	return tx.db.BaseDB()
 }
 
 // Tx returns the internal sqlx transaction.
-func (tx *Tx) Tx() *sqlx.Tx {
+func (tx *Tx) BaseTx() *sqlx.Tx {
 	return tx.internal
 }
 
@@ -264,6 +264,11 @@ func (tx *Tx) Close() error {
 // RolledBack returns true if the transaction was rolled back.
 func (tx *Tx) RolledBack() bool {
 	return tx.rollback
+}
+
+// Name returns the datasource name for this connection
+func (tx *Tx) Name() string {
+	return tx.db.name
 }
 
 // Confirm the transaction is viable before executing a query.

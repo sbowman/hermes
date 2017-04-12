@@ -24,11 +24,11 @@ import (
 // Conn masks the *sqlx.DB and *sqlx.Tx.
 type Conn interface {
 	// DB returns the base database connection.
-	DB() *sqlx.DB
+	BaseDB() *sqlx.DB
 
 	// Tx returns the base database transaction, or nil if there is no
 	// transaction.
-	Tx() *sqlx.Tx
+	BaseTx() *sqlx.Tx
 
 	// Context returns the context associated with this transaction, or nil
 	// if a context is not associated.
@@ -73,14 +73,22 @@ type Conn interface {
 
 	// Is this connection in a rollback state?
 	RolledBack() bool
+
+	// The data source name for this connection
+	Name() string
 }
 
 // Connect opens a connection to the database and pings it.
-func Connect(driverName, dataSourceName string) (*DB, error) {
+func Connect(driverName, dataSourceName string, maxOpen, maxIdle int) (*DB, error) {
 	db, err := sqlx.Connect(driverName, dataSourceName)
 	if err != nil {
 		return nil, err
 	}
+	db.SetMaxOpenConns(maxOpen)
+	db.SetMaxIdleConns(maxIdle)
 
-	return &DB{db}, nil
+	return &DB{
+		name: dataSourceName,
+		internal: db,
+	}, nil
 }

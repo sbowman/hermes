@@ -15,7 +15,7 @@ const (
 // Return a connection to the database.  Will generate a fatal error if unable
 // to connect.
 func connect(t *testing.T) *hermes.DB {
-	db, err := hermes.Connect(driver, database)
+	db, err := hermes.Connect(driver, database, 5, 1)
 	if err != nil {
 		t.Fatalf("Failed to connect to the hermes_test database: %s", err)
 	}
@@ -33,7 +33,7 @@ func TestConnection(t *testing.T) {
 }
 
 func TestBadDatabase(t *testing.T) {
-	_, err := hermes.Connect(driver, "postgres://postgres@127.0.0.1/nemo?sslmode=disable&connect_timeout=10")
+	_, err := hermes.Connect(driver, "postgres://postgres@127.0.0.1/nemo?sslmode=disable&connect_timeout=10", 5, 1)
 	if err == nil {
 		t.Fatalf(`Missing "nemo" database didn't generate an error!  Does it exist?`)
 	}

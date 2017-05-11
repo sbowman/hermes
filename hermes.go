@@ -17,8 +17,16 @@ package hermes
 import (
 	"context"
 	"database/sql"
+	"fmt"
 
+	"github.com/cenkalti/backoff"
 	"github.com/jmoiron/sqlx"
+)
+
+var (
+	// MaxElapsedTime is the maximum time hermes.Connect() will spend attempting
+	// to connect to the database before returning an error
+	MaxElapsedTime = backoff.DefaultMaxElapsedTime
 )
 
 // Conn masks the *sqlx.DB and *sqlx.Tx.
@@ -80,15 +88,39 @@ type Conn interface {
 
 // Connect opens a connection to the database and pings it.
 func Connect(driverName, dataSourceName string, maxOpen, maxIdle int) (*DB, error) {
-	db, err := sqlx.Connect(driverName, dataSourceName)
+	db, err := sqlx.Open(driverName, dataSourceName)
 	if err != nil {
 		return nil, err
 	}
 	db.SetMaxOpenConns(maxOpen)
 	db.SetMaxIdleConns(maxIdle)
 
+	// ping database with exponential back off
+	if err := mustPing(db); err != nil {
+		return nil, err
+	}
+
 	return &DB{
-		name: dataSourceName,
+		name:     dataSourceName,
 		internal: db,
 	}, nil
+}
+
+// mustPing pings the database with an exponential back off. If we cannot
+// connect after MaxElapsedTime, return an error.
+func mustPing(db *sqlx.DB) error {
+	var err error
+	b := backoff.NewExponentialBackOff()
+	b.MaxElapsedTime = MaxElapsedTime
+	ticker := backoff.NewTicker(b)
+
+	for range ticker.C {
+		if err = db.Ping(); err != nil {
+			continue
+		}
+		ticker.Stop()
+		return nil
+	}
+
+	return fmt.Errorf("Could not ping database")
 }

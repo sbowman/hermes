@@ -31,7 +31,6 @@ func connect(t *testing.T) *hermes.DB {
 func TestConnection(t *testing.T) {
 	db := connect(t)
 	defer db.Close()
-	hermes.MaxElapsedTime = 1 * time.Second
 
 	if err := db.Ping(); err != nil {
 		t.Fatalf("Unable to ping the database: %s", err)

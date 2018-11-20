@@ -33,7 +33,8 @@ be aggregated and used in a single transaction, as well as for testing.
     }
 
     func main() {
-        conn, err := hermes.Connect("postgres", "postgres://postgres@127.0.0.1/engaged?sslmode=disable&connect_timeout=10")
+        // Create a connection pool with max 10 connections, min 2 idle connections...
+        conn, err := hermes.Connect("postgres", "postgres://postgres@127.0.0.1/engaged?sslmode=disable&connect_timeout=10", 10, 2)
         if err != nil {
             return err
         }
@@ -60,6 +61,30 @@ be aggregated and used in a single transaction, as well as for testing.
         // Don't forget to commit, or you'll automatically rollback on 
         // "defer tx.Close()" above!
         tx.Commit() 
+    }
+
+## OnFailure (1.2.x)
+
+Hermes supports an `OnFailure` function that may be called any time a database
+error appears to be an unrecoverable connection or server failure.  This
+function is set on the database connection (`hermes.DB`), and may be customized
+to your environment with custom handling or logging functionality.
+
+    // Create a connection pool with max 10 connections, min 2 idle connections...
+    conn, err := hermes.Connect("postgres", "postgres://postgres@127.0.0.1/engaged?sslmode=disable&connect_timeout=10", 10, 2)
+    if err != nil {
+        return err
+    }
+    
+    // In a Kubernetes deployment, this will cause the app to shutdown and let
+    // Kubernetes restart the pod...
+    conn.OnFailure = hermes.ExitOnFailure
+
+    // If the connection fails when conn.Exec is called, hermes.ExitOnFailure
+    // is called, the application exits, and Kubernetes restarts the app, 
+    // allowing the app to try to reconnect to the database.
+    if _, err := conn.Exec("...."); err != nil {
+        return err
     }
 
 ## Testing

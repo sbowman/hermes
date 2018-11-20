@@ -14,7 +14,7 @@ const (
 )
 
 func init() {
-	hermes.MaxElapsedTime = 1 * time.Second
+	hermes.MaxRetryTime = 1 * time.Second
 }
 
 // Return a connection to the database.  Will generate a fatal error if unable

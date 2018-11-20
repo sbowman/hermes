@@ -17,7 +17,7 @@ package hermes
 import (
 	"context"
 	"database/sql"
-	"fmt"
+	"errors"
 
 	"github.com/cenkalti/backoff"
 	"github.com/jmoiron/sqlx"
@@ -26,7 +26,11 @@ import (
 var (
 	// MaxElapsedTime is the maximum time hermes.Connect() will spend attempting
 	// to connect to the database before returning an error
-	MaxElapsedTime = backoff.DefaultMaxElapsedTime
+	MaxRetryTime = backoff.DefaultMaxElapsedTime
+
+	// ErrTooManyClients matches the error returned by PostgreSQL when the
+	// number of client connections exceeds that allowed by the server.
+	ErrTooManyClients = errors.New("pq: sorry, too many clients already")
 )
 
 // Conn masks the *sqlx.DB and *sqlx.Tx.
@@ -88,39 +92,69 @@ type Conn interface {
 
 // Connect opens a connection to the database and pings it.
 func Connect(driverName, dataSourceName string, maxOpen, maxIdle int) (*DB, error) {
-	db, err := sqlx.Open(driverName, dataSourceName)
+	db, err := open(driverName, dataSourceName, maxOpen, maxIdle)
+	if err != nil {
+		return nil, err // should only return a misconfiguration error
+	}
+
+	return NewDB(dataSourceName, db, nil), nil
+}
+
+// ConnectUnchecked connects to the database, but does not test the connection
+// before returning.
+func ConnectUnchecked(driverName, dataSourceName string, maxOpen, maxIdle int) (*DB, error) {
+	db, err := dial(driverName, dataSourceName, maxOpen, maxIdle)
+	if err != nil {
+		return nil, err // should only return a misconfiguration error
+	}
+
+	return NewDB(dataSourceName, db, nil), nil
+}
+
+// Keep trying to open a database connection.  If the connection times out,
+// retries for MaxRetryTime.
+func open(driverName, dataSourceName string, maxOpen, maxIdle int) (*sqlx.DB, error) {
+	var db *sqlx.DB
+	var err error
+
+	// Keep trying the connection until it confirmed
+	b := backoff.NewExponentialBackOff()
+	b.MaxElapsedTime = MaxRetryTime
+
+	ticker := backoff.NewTicker(b)
+	for range ticker.C {
+		db, err = dial(driverName, dataSourceName, maxOpen, maxIdle)
+		if err != nil {
+			return nil, err // only configuration errors
+		}
+
+		if err = db.Ping(); err != nil {
+			if db != nil {
+				db.Close()
+			}
+			continue
+		}
+
+		ticker.Stop()
+		break
+	}
+
 	if err != nil {
 		return nil, err
 	}
+
+	return db, nil
+}
+
+// Setup a sqlx.DB connection.
+func dial(driverName, dataSourceName string, maxOpen, maxIdle int) (*sqlx.DB, error) {
+	db, err := sqlx.Open(driverName, dataSourceName)
+	if err != nil {
+		return nil, err // note: only returns misconfiguration errors
+	}
+
 	db.SetMaxOpenConns(maxOpen)
 	db.SetMaxIdleConns(maxIdle)
 
-	// ping database with exponential back off
-	if err := mustPing(db); err != nil {
-		return nil, err
-	}
-
-	return &DB{
-		name:     dataSourceName,
-		internal: db,
-	}, nil
-}
-
-// mustPing pings the database with an exponential back off. If we cannot
-// connect after MaxElapsedTime, return an error.
-func mustPing(db *sqlx.DB) error {
-	var err error
-	b := backoff.NewExponentialBackOff()
-	b.MaxElapsedTime = MaxElapsedTime
-	ticker := backoff.NewTicker(b)
-
-	for range ticker.C {
-		if err = db.Ping(); err != nil {
-			continue
-		}
-		ticker.Stop()
-		return nil
-	}
-
-	return fmt.Errorf("Could not ping database")
+	return db, nil
 }

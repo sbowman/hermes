@@ -9,8 +9,22 @@ import (
 
 // DB represents a database connection.  Implements the hermes.Conn interface.
 type DB struct {
-	name string
+	// OnFailure, if defined, is called when the database connection returns
+	// a connection failed or other server-related error.  May be used to
+	// reset the database pool connections.  Optional.
+	OnFailure FailureFn
+
+	name     string
 	internal *sqlx.DB
+}
+
+// NewDB creates a new database connection.  Primary used for testing.
+func NewDB(name string, internal *sqlx.DB, fn FailureFn) *DB {
+	return &DB{
+		OnFailure: fn,
+		name:      name,
+		internal:  internal,
+	}
 }
 
 // MaxOpen sets the maximum number of database connections to pool.
@@ -25,7 +39,7 @@ func (db *DB) MaxIdle(n int) {
 
 // Ping the database to ensure it's alive.
 func (db *DB) Ping() error {
-	return db.internal.Ping()
+	return db.check(db.internal.Ping())
 }
 
 // DB returns the base database connection.
@@ -48,7 +62,7 @@ func (db *DB) Context() context.Context {
 func (db *DB) Begin() (Conn, error) {
 	tx, err := db.internal.Beginx()
 	if err != nil {
-		return nil, err
+		return nil, db.check(err)
 	}
 
 	return &Tx{
@@ -62,7 +76,7 @@ func (db *DB) Begin() (Conn, error) {
 func (db *DB) BeginCtx(ctx context.Context) (Conn, error) {
 	tx, err := db.internal.Beginx()
 	if err != nil {
-		return nil, err
+		return nil, db.check(err)
 	}
 
 	return &Tx{
@@ -74,32 +88,42 @@ func (db *DB) BeginCtx(ctx context.Context) (Conn, error) {
 
 // Exec executes a database statement with no results..
 func (db *DB) Exec(query string, args ...interface{}) (sql.Result, error) {
-	return db.internal.Exec(query, args...)
+	res, err := db.internal.Exec(query, args...)
+	return res, db.check(err)
 }
 
 // Query the databsae.
 func (db *DB) Query(query string, args ...interface{}) (*sqlx.Rows, error) {
-	return db.internal.Queryx(query, args...)
+	rows, err := db.internal.Queryx(query, args...)
+	return rows, db.check(err)
 }
 
 // Row returns the results for a single row.
 func (db *DB) Row(query string, args ...interface{}) (*sqlx.Row, error) {
-	return db.internal.QueryRowx(query, args...), nil
+	row := db.internal.QueryRowx(query, args...)
+
+	err := row.Err()
+	if err != nil {
+		return nil, db.check(err)
+	}
+
+	return row, nil
 }
 
 // Prepare a database query.
 func (db *DB) Prepare(query string) (*sqlx.Stmt, error) {
-	return db.internal.Preparex(query)
+	stmt, err := db.internal.Preparex(query)
+	return stmt, db.check(err)
 }
 
 // Get a single record from the database, e.g. "SELECT ... LIMIT 1".
 func (db *DB) Get(dest interface{}, query string, args ...interface{}) error {
-	return db.internal.Get(dest, query, args...)
+	return db.check(db.internal.Get(dest, query, args...))
 }
 
 // Select a collection of records from the database.
 func (db *DB) Select(dest interface{}, query string, args ...interface{}) error {
-	return db.internal.Select(dest, query, args...)
+	return db.check(db.internal.Select(dest, query, args...))
 }
 
 // Commit does nothing in a raw connection.
@@ -114,7 +138,7 @@ func (db *DB) Rollback() error {
 
 // Close closes the database connection and returns it to the pool.
 func (db *DB) Close() error {
-	return db.internal.Close()
+	return db.check(db.internal.Close())
 }
 
 // RolledBack always returns false.
@@ -125,4 +149,14 @@ func (db *DB) RolledBack() bool {
 // Name returns the datasource name for this connection
 func (db *DB) Name() string {
 	return db.name
+}
+
+// Checks the error message and alerts if there was a problem.
+func (db *DB) check(err error) error {
+	if err == nil || db.OnFailure == nil || !DidConnectionFail(err) {
+		return err
+	}
+
+	db.OnFailure(db, err)
+	return err
 }

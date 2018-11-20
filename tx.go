@@ -100,11 +100,16 @@ func (tx *Tx) Exec(query string, args ...interface{}) (sql.Result, error) {
 		return nil, err
 	}
 
+	var res sql.Result
+	var err error
+
 	if tx.ctx != nil {
-		return tx.internal.ExecContext(tx.ctx, query, args...)
+		res, err = tx.internal.ExecContext(tx.ctx, query, args...)
+	} else {
+		res, err = tx.internal.Exec(query, args...)
 	}
 
-	return tx.internal.Exec(query, args...)
+	return res, tx.check(err)
 }
 
 // Query the databsae.
@@ -116,11 +121,16 @@ func (tx *Tx) Query(query string, args ...interface{}) (*sqlx.Rows, error) {
 		return nil, err
 	}
 
+	var rows *sqlx.Rows
+	var err error
+
 	if tx.ctx != nil {
-		return tx.internal.QueryxContext(tx.ctx, query, args...)
+		rows, err = tx.internal.QueryxContext(tx.ctx, query, args...)
+	} else {
+		rows, err = tx.internal.Queryx(query, args...)
 	}
 
-	return tx.internal.Queryx(query, args...)
+	return rows, tx.check(err)
 }
 
 // Row queries the databsae for a single row.
@@ -132,11 +142,19 @@ func (tx *Tx) Row(query string, args ...interface{}) (*sqlx.Row, error) {
 		return nil, err
 	}
 
+	var row *sqlx.Row
+
 	if tx.ctx != nil {
-		return tx.internal.QueryRowxContext(tx.ctx, query, args...), nil
+		row = tx.internal.QueryRowxContext(tx.ctx, query, args...)
+	} else {
+		row = tx.internal.QueryRowx(query, args...)
 	}
 
-	return tx.internal.QueryRowx(query, args...), nil
+	if row.Err() != nil {
+		return nil, tx.check(row.Err())
+	}
+
+	return row, nil
 }
 
 // Prepare a database query.
@@ -154,7 +172,8 @@ func (tx *Tx) Prepare(query string) (*sqlx.Stmt, error) {
 	// 	return tx.internal.PreparexContext(tx.ctx, query, args...)
 	// }
 
-	return tx.internal.Preparex(query)
+	stmt, err := tx.internal.Preparex(query)
+	return stmt, tx.check(err)
 }
 
 // Get a single record from the database, e.g. "SELECT ... LIMIT 1".
@@ -167,10 +186,10 @@ func (tx *Tx) Get(dest interface{}, query string, args ...interface{}) error {
 	}
 
 	if tx.ctx != nil {
-		return tx.internal.GetContext(tx.ctx, dest, query, args...)
+		return tx.check(tx.internal.GetContext(tx.ctx, dest, query, args...))
 	}
 
-	return tx.internal.Get(dest, query, args...)
+	return tx.check(tx.internal.Get(dest, query, args...))
 }
 
 // Select a collection record from the database.
@@ -183,10 +202,10 @@ func (tx *Tx) Select(dest interface{}, query string, args ...interface{}) error 
 	}
 
 	if tx.ctx != nil {
-		return tx.internal.SelectContext(tx.ctx, dest, query, args...)
+		return tx.check(tx.internal.SelectContext(tx.ctx, dest, query, args...))
 	}
 
-	return tx.internal.Select(dest, query, args...)
+	return tx.check(tx.internal.Select(dest, query, args...))
 }
 
 // Commit the current transaction.  Returns ErrTxRolledBack if the transaction
@@ -205,7 +224,7 @@ func (tx *Tx) Commit() error {
 
 	if len(tx.history) == 0 {
 		if err := tx.internal.Commit(); err != nil {
-			return err
+			return tx.check(err)
 		}
 	}
 
@@ -229,7 +248,7 @@ func (tx *Tx) Rollback() error {
 	}
 
 	if err := tx.internal.Rollback(); err != nil {
-		return err
+		return tx.check(err)
 	}
 
 	tx.current = _rollback
@@ -251,7 +270,7 @@ func (tx *Tx) Close() error {
 
 	if err := tx.internal.Rollback(); err != nil {
 		tx.pop()
-		return err
+		return tx.check(err)
 	}
 
 	tx.current = _rollback
@@ -295,4 +314,8 @@ func (tx *Tx) pop() {
 	}
 
 	tx.current, tx.history = tx.history[len(tx.history)-1], tx.history[:len(tx.history)-1]
+}
+
+func (tx *Tx) check(err error) error {
+	return tx.db.check(err)
 }

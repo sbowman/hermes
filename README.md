@@ -87,6 +87,14 @@ to your environment with custom handling or logging functionality.
         return err
     }
 
+### DidConnectionFail (1.2.x)
+
+If `OnFailure` is not defined, Hermes simply returns the error as normal,
+expecting the application to do something with it.  In these situations, there
+is a function in Hermes that can check if the error returned by `lib/pq` is a
+connection error: `hermes.DidConnectionFail`.  Pass the error to that, and if
+it's a connection error, the function returns true.
+
 ## Testing
 
 Testing requires the lib/pq library, a PostgreSQL database, and a test database

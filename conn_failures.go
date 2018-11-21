@@ -12,8 +12,8 @@ import (
 // connection failures and resetting the database connection pool.
 type FailureFn func(db *DB, err error)
 
-// CheckPanic panics when the connection fails or the database server errors.
-// If your application traps panics, see ExitOnFailure.
+// PanicOnFailure panics when the connection fails or the database server
+// errors.  If your application traps panics, see ExitOnFailure.
 func PanicOnFailure(db *DB, err error) {
 	panic(err)
 }

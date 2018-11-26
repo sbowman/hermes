@@ -63,7 +63,7 @@ be aggregated and used in a single transaction, as well as for testing.
         tx.Commit() 
     }
 
-## OnFailure (1.2.x)
+## OnFailure (1.1.x)
 
 Hermes supports an `OnFailure` function that may be called any time a database
 error appears to be an unrecoverable connection or server failure.  This
@@ -87,7 +87,7 @@ to your environment with custom handling or logging functionality.
         return err
     }
 
-### DidConnectionFail (1.2.x)
+### DidConnectionFail (1.1.x)
 
 If `OnFailure` is not defined, Hermes simply returns the error as normal,
 expecting the application to do something with it.  In these situations, there

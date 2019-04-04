@@ -75,6 +75,10 @@ func TestTxTimer(t *testing.T) {
 	defer db.Close()
 
 	stderr := os.Stderr
+	defer func() {
+		os.Stderr = stderr
+	}()
+
 	r, w, _ := os.Pipe()
 	os.Stderr = w
 
@@ -89,8 +93,6 @@ func TestTxTimer(t *testing.T) {
 
 	w.Close()
 	out, _ := ioutil.ReadAll(r)
-	os.Stderr = stderr
-
 	output := string(out)
 
 	if !strings.Contains(output, "Transaction lifetime exceeded timeout") {

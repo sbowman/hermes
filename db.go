@@ -200,10 +200,7 @@ func (t *txTimer) stop() {
 		return
 	}
 
-	if !t.timer.Stop() {
-		<-t.timer.C
-	}
-
+	t.timer.Stop()
 	t.timer = nil
 }
 

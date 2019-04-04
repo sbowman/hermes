@@ -2,7 +2,11 @@ package hermes_test
 
 import (
 	"database/sql"
+	"io/ioutil"
+	"os"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/sbowman/hermes"
 )
@@ -57,6 +61,40 @@ func TestTransaction(t *testing.T) {
 		if check == "Sphinx" {
 			t.Error("Record not deleted")
 		}
+	}
+}
+
+// Will transactions alert if it lasts too long (in dev mode)?
+func TestTxTimer(t *testing.T) {
+	timeout := 100 * time.Millisecond
+
+	hermes.EnableTimeouts(timeout, false)
+	defer hermes.DisableTimeouts()
+
+	db := connect(t)
+	defer db.Close()
+
+	stderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Unable to create transaction: %s", err)
+	}
+	defer tx.Close()
+
+	// Should trip the timer...
+	time.Sleep(timeout * 2)
+
+	w.Close()
+	out, _ := ioutil.ReadAll(r)
+	os.Stderr = stderr
+
+	output := string(out)
+
+	if !strings.Contains(output, "Transaction lifetime exceeded timeout") {
+		t.Error("Failed to timeout the transaction")
 	}
 }
 

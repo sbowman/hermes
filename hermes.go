@@ -18,13 +18,35 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"time"
 
 	"github.com/cenkalti/backoff"
 	"github.com/jmoiron/sqlx"
 )
 
 var (
-	// MaxElapsedTime is the maximum time hermes.Connect() will spend attempting
+	// TxTimeout configures the transaction timer, which warns you about
+	// long-lived transactions.  This can be used in development to ensure
+	// all transactions are closed correctly.
+	//
+	// Enabling transaction timeouts should not be used in production.  If
+	// enabled, a timer is created for each transaction, adding measurable
+	// overhead to database processing.
+	TxTimeout struct {
+		// Enabled must be set to true to enable transaction timers.
+		Enabled bool
+
+		// Duration is the time to wait in milliseconds before reporting
+		// a transaction being left open.
+		Duration time.Duration
+
+		// Panic set to true causes Hermes to panic if the transaction
+		// remains open past its duration.  When false, Hermes simply
+		// writes a message to os.Stderr.
+		Panic bool
+	}
+
+	// MaxRetryTime is the maximum time hermes.Connect() will spend attempting
 	// to connect to the database before returning an error
 	MaxRetryTime = backoff.DefaultMaxElapsedTime
 
@@ -109,6 +131,34 @@ func ConnectUnchecked(driverName, dataSourceName string, maxOpen, maxIdle int) (
 	}
 
 	return NewDB(dataSourceName, db, nil), nil
+}
+
+// EnableTimeouts enables the transaction timer, which will display an error
+// message or panic if a transaction exceeds the precribed duration.  Useful
+// during development for tracking down transactions that weren't properly
+// cleaned up.
+//
+// Transaction timers may be enabled and disabled at will without requiring a
+// restart.
+//
+// Do not use in production!  The overhead will measurably slow down your application.
+func EnableTimeouts(dur time.Duration, panic bool) {
+	if dur == 0 {
+		return
+	}
+
+	TxTimeout.Duration = dur
+	TxTimeout.Panic = panic
+	TxTimeout.Enabled = true
+}
+
+// DisableTimeouts disables transaction timeouts.  Transaction timers may be
+// disabled at any time.  Any existing timers will simply clean themselves up
+// quietly.
+func DisableTimeouts() {
+	TxTimeout.Enabled = false
+	TxTimeout.Duration = 0
+	TxTimeout.Panic = false
 }
 
 // Keep trying to open a database connection.  If the connection times out,

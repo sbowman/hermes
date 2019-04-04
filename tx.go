@@ -11,15 +11,15 @@ import (
 
 var (
 	// ErrBadContext returned when the caller attempts to reset the context.
-	ErrBadContext = errors.New("Context mismatch")
+	ErrBadContext = errors.New("context mismatch")
 
 	// ErrTxRolledBack returned by calls to the transaction if it has been
 	// rolled back.
-	ErrTxRolledBack = errors.New("Transaction rolled back")
+	ErrTxRolledBack = errors.New("transaction rolled back")
 
 	// ErrTxCommitted returned if the caller tries to rollback then
 	// commit a transaction in the same function.
-	ErrTxCommitted = errors.New("Already committed")
+	ErrTxCommitted = errors.New("already committed")
 )
 
 const (
@@ -39,15 +39,16 @@ type Tx struct {
 	current int   // current state
 	history []int // past states
 
-	rollback bool // is the transaction being rolled back?
+	rollback bool     // is the transaction being rolled back?
+	timer    *txTimer // if TxTimeout is set, reports when Tx existence exceeds timeout
 }
 
-// DB returns the base database connection.
+// BaseDB returns the base database connection.
 func (tx *Tx) BaseDB() *sqlx.DB {
 	return tx.db.BaseDB()
 }
 
-// Tx returns the internal sqlx transaction.
+// BaseTx returns the internal sqlx transaction.
 func (tx *Tx) BaseTx() *sqlx.Tx {
 	return tx.internal
 }
@@ -112,7 +113,7 @@ func (tx *Tx) Exec(query string, args ...interface{}) (sql.Result, error) {
 	return res, tx.check(err)
 }
 
-// Query the databsae.
+// Query the database.
 func (tx *Tx) Query(query string, args ...interface{}) (*sqlx.Rows, error) {
 	tx.Lock()
 	defer tx.Unlock()
@@ -310,6 +311,11 @@ func (tx *Tx) push() {
 
 func (tx *Tx) pop() {
 	if len(tx.history) == 0 {
+		if tx.timer != nil {
+			tx.timer.stop()
+			tx.timer = nil
+		}
+
 		return
 	}
 

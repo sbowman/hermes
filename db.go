@@ -3,6 +3,11 @@ package hermes
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -42,12 +47,12 @@ func (db *DB) Ping() error {
 	return db.check(db.internal.Ping())
 }
 
-// DB returns the base database connection.
+// BaseDB returns the base database connection.
 func (db *DB) BaseDB() *sqlx.DB {
 	return db.internal
 }
 
-// Tx returns nil.
+// BaseTx returns nil.
 func (db *DB) BaseTx() *sqlx.Tx {
 	return nil
 }
@@ -68,6 +73,7 @@ func (db *DB) Begin() (Conn, error) {
 	return &Tx{
 		db:       db,
 		internal: tx,
+		timer:    newTxTimer(),
 	}, nil
 }
 
@@ -83,6 +89,7 @@ func (db *DB) BeginCtx(ctx context.Context) (Conn, error) {
 		ctx:      ctx,
 		db:       db,
 		internal: tx,
+		timer:    newTxTimer(),
 	}, nil
 }
 
@@ -159,4 +166,63 @@ func (db *DB) check(err error) error {
 
 	db.OnFailure(db, err)
 	return err
+}
+
+type txTimer struct {
+	timer *time.Timer
+	file  string // track where the transaction was declared
+	line  int
+}
+
+// Helper function to configure a transaction timer.  Transaction timers report
+// an error if a transaction is left open longer than TxTimeout.
+func newTxTimer() *txTimer {
+	if !TxTimeout.Enabled || TxTimeout.Duration == 0 {
+		return nil
+	}
+
+	var t txTimer
+
+	_, file, line, ok := runtime.Caller(2)
+	if ok {
+		t.file = fmt.Sprintf("%s/%s", filepath.Base(filepath.Dir(file)), filepath.Base(file))
+		t.line = line
+
+	}
+
+	t.timer = time.AfterFunc(TxTimeout.Duration, t.txTimedOut)
+
+	return &t
+}
+
+func (t *txTimer) stop() {
+	if t.timer == nil {
+		return
+	}
+
+	if !t.timer.Stop() {
+		<-t.timer.C
+	}
+
+	t.timer = nil
+}
+
+// Called if the transaction timer trips, i.e. the transaction exceeded its timeout.
+func (t *txTimer) txTimedOut() {
+	if !TxTimeout.Enabled {
+		return
+	}
+
+	var msg string
+	if t.file != "" {
+		msg = fmt.Sprintf("Transaction lifetime exceeded timeout (%s:%d)", t.file, t.line)
+	} else {
+		msg = "Transaction lifetime exceeded timeout"
+	}
+
+	if TxTimeout.Panic {
+		panic(msg)
+	}
+
+	fmt.Fprintln(os.Stderr, msg)
 }

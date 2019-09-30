@@ -20,7 +20,6 @@ import (
 	"errors"
 	"time"
 
-	"github.com/cenkalti/backoff"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -45,10 +44,6 @@ var (
 		// writes a message to os.Stderr.
 		Panic bool
 	}
-
-	// MaxRetryTime is the maximum time hermes.Connect() will spend attempting
-	// to connect to the database before returning an error
-	MaxRetryTime = backoff.DefaultMaxElapsedTime
 
 	// ErrTooManyClients matches the error returned by PostgreSQL when the
 	// number of client connections exceeds that allowed by the server.
@@ -161,35 +156,19 @@ func DisableTimeouts() {
 	TxTimeout.Panic = false
 }
 
-// Keep trying to open a database connection.  If the connection times out,
-// retries for MaxRetryTime.
+// Open a connection to the database and ping to make sure the connection is
+// working.
 func open(driverName, dataSourceName string, maxOpen, maxIdle int) (*sqlx.DB, error) {
-	var db *sqlx.DB
-	var err error
-
-	// Keep trying the connection until it confirmed
-	b := backoff.NewExponentialBackOff()
-	b.MaxElapsedTime = MaxRetryTime
-
-	ticker := backoff.NewTicker(b)
-	for range ticker.C {
-		db, err = dial(driverName, dataSourceName, maxOpen, maxIdle)
-		if err != nil {
-			return nil, err // only configuration errors
-		}
-
-		if err = db.Ping(); err != nil {
-			if db != nil {
-				db.Close()
-			}
-			continue
-		}
-
-		ticker.Stop()
-		break
+	db, err := dial(driverName, dataSourceName, maxOpen, maxIdle)
+	if err != nil {
+		return nil, err // only configuration errors
 	}
 
-	if err != nil {
+	if err = db.Ping(); err != nil {
+		if db != nil {
+			db.Close()
+		}
+
 		return nil, err
 	}
 

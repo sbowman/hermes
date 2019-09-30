@@ -2,7 +2,6 @@ package hermes_test
 
 import (
 	"testing"
-	"time"
 
 	_ "github.com/lib/pq"
 	"github.com/sbowman/hermes"
@@ -12,10 +11,6 @@ const (
 	driver   = "postgres"
 	database = "postgres://postgres@127.0.0.1/hermes_test?sslmode=disable&connect_timeout=10"
 )
-
-func init() {
-	hermes.MaxRetryTime = 1 * time.Second
-}
 
 // Return a connection to the database.  Will generate a fatal error if unable
 // to connect.

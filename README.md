@@ -1,4 +1,4 @@
-# Hermes 1.2.1
+# Hermes 1.2.3
 
 Hermes wraps the `jmoiron/sqlx` *sqlx.DB and *sqlx.Tx models in a common 
 interface, hermes.Conn.  Makes it easier to build small functions that can
@@ -64,6 +64,51 @@ be aggregated and used in a single transaction, as well as for testing.
         // "defer tx.Close()" above!
         tx.Commit() 
     }
+
+## Confirm (1.2.3)
+
+If the network environment is unstable, Hermes may be configured to retry 
+connections from the connection pool if those pooled connections lose their
+connectivity to the database.  
+
+To enable connection confirmations, set the `hermes.Confirm` global variable to  
+a number greater than 0:
+
+    // Create a connection pool with max 10 connections, min 2 idle connections...
+    conn, err := hermes.Connect("postgres", 
+        "postgres://postgres@127.0.0.1/engaged?sslmode=disable&connect_timeout=10", 
+        10, 2)
+    if err != nil {
+        return err
+    }
+    
+    // Check each database connection at least twice before panicking
+    hermes.Confirm = 2
+
+When confirmation is enabled, Hermes pings the database prior to making any
+database requests (begin a transaction, select, insert, etc.).  If the ping 
+fails, Hermes waits a moment and tries again, up to the number of times 
+specified in `hermes.Confirm`.  Each try, the `sql.Ping()` function tries to 
+reconnect to the database.
+
+If Hermes can't open the database connection again after trying repeatedly, it
+panics and crashes the application.  Ideally systemd, Kubernetes, or whatever 
+monitor is watching the application will restart the app and clear up the cause 
+of the problem, or at least alert someone there's a problem. 
+
+The `hermes.Confirm` functionality should be coupled with a `connect_timeout`
+value in the PostgreSQL configuration, or the equivalent for whatever database
+is being used. 
+
+This check is not performed with queries made within a transaction.  If the 
+connection is lost mid-transaction, there is no point trying to reconnect, as 
+the transaction is lost.  At that point, the transaction should simply fail.
+
+There is the performance hit of an additional `sql.Ping()` request with nearly 
+every database query.  If you don't need this functionality, we recommend you
+don't enable it.   
+
+By default this functionality is *disabled*.
 
 ## OnFailure (1.1.x)
 

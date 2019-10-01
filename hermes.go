@@ -48,6 +48,12 @@ var (
 	// ErrTooManyClients matches the error returned by PostgreSQL when the
 	// number of client connections exceeds that allowed by the server.
 	ErrTooManyClients = errors.New("pq: sorry, too many clients already")
+
+	// Confirm indicates whether or not to test each database connection
+	// for validity before attempting a query, i.e. issue a Ping first.
+	// Set to the number of retries before failing.  Default is to not
+	// confirm the connection, i.e. zero retries.
+	Confirm int
 )
 
 // Conn masks the *sqlx.DB and *sqlx.Tx.

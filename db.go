@@ -34,17 +34,17 @@ func NewDB(name string, internal *sqlx.DB, fn FailureFn) *DB {
 
 // MaxOpen sets the maximum number of database connections to pool.
 func (db *DB) MaxOpen(n int) {
-	db.internal.SetMaxOpenConns(n)
+	db.raw().SetMaxOpenConns(n)
 }
 
 // MaxIdle set the maximum number of idle connections to leave in the pool.
 func (db *DB) MaxIdle(n int) {
-	db.internal.SetMaxIdleConns(n)
+	db.raw().SetMaxIdleConns(n)
 }
 
 // Ping the database to ensure it's alive.
 func (db *DB) Ping() error {
-	return db.check(db.internal.Ping())
+	return db.check(db.raw().Ping())
 }
 
 // BaseDB returns the base database connection.
@@ -65,7 +65,7 @@ func (db *DB) Context() context.Context {
 // Begin a new transaction.  Returns a Conn wrapping the transaction
 // (*sqlx.Tx).
 func (db *DB) Begin() (Conn, error) {
-	tx, err := db.internal.Beginx()
+	tx, err := db.raw().Beginx()
 	if err != nil {
 		return nil, db.check(err)
 	}
@@ -80,7 +80,7 @@ func (db *DB) Begin() (Conn, error) {
 // BeginCtx begins a new transaction in context.  The Conn will have the context
 // associated with it and use it for all subsequent commands.
 func (db *DB) BeginCtx(ctx context.Context) (Conn, error) {
-	tx, err := db.internal.Beginx()
+	tx, err := db.raw().Beginx()
 	if err != nil {
 		return nil, db.check(err)
 	}
@@ -95,19 +95,19 @@ func (db *DB) BeginCtx(ctx context.Context) (Conn, error) {
 
 // Exec executes a database statement with no results..
 func (db *DB) Exec(query string, args ...interface{}) (sql.Result, error) {
-	res, err := db.internal.Exec(query, args...)
+	res, err := db.raw().Exec(query, args...)
 	return res, db.check(err)
 }
 
 // Query the databsae.
 func (db *DB) Query(query string, args ...interface{}) (*sqlx.Rows, error) {
-	rows, err := db.internal.Queryx(query, args...)
+	rows, err := db.raw().Queryx(query, args...)
 	return rows, db.check(err)
 }
 
 // Row returns the results for a single row.
 func (db *DB) Row(query string, args ...interface{}) (*sqlx.Row, error) {
-	row := db.internal.QueryRowx(query, args...)
+	row := db.raw().QueryRowx(query, args...)
 
 	err := row.Err()
 	if err != nil {
@@ -119,18 +119,18 @@ func (db *DB) Row(query string, args ...interface{}) (*sqlx.Row, error) {
 
 // Prepare a database query.
 func (db *DB) Prepare(query string) (*sqlx.Stmt, error) {
-	stmt, err := db.internal.Preparex(query)
+	stmt, err := db.raw().Preparex(query)
 	return stmt, db.check(err)
 }
 
 // Get a single record from the database, e.g. "SELECT ... LIMIT 1".
 func (db *DB) Get(dest interface{}, query string, args ...interface{}) error {
-	return db.check(db.internal.Get(dest, query, args...))
+	return db.check(db.raw().Get(dest, query, args...))
 }
 
 // Select a collection of records from the database.
 func (db *DB) Select(dest interface{}, query string, args ...interface{}) error {
-	return db.check(db.internal.Select(dest, query, args...))
+	return db.check(db.raw().Select(dest, query, args...))
 }
 
 // Commit does nothing in a raw connection.
@@ -145,7 +145,7 @@ func (db *DB) Rollback() error {
 
 // Close closes the database connection and returns it to the pool.
 func (db *DB) Close() error {
-	return db.check(db.internal.Close())
+	return db.check(db.raw().Close())
 }
 
 // RolledBack always returns false.
@@ -166,6 +166,27 @@ func (db *DB) check(err error) error {
 
 	db.OnFailure(db, err)
 	return err
+}
+
+// Returns a reference to a database connection, but tests for validity prior
+// to returning and ensures a valid database connection.  If the connection
+// fails, may panic.
+func (db *DB) raw() *sqlx.DB {
+	if Confirm == 0 {
+		return db.internal
+	}
+
+	// Repeatedly ping the connection; ping will also try to reconnect if
+	// the connection is lost
+	conn := db.internal
+	for idx := 0; idx < Confirm; idx++ {
+		if err := conn.Ping(); err == nil {
+			return conn
+		}
+		time.Sleep(time.Microsecond)
+	}
+
+	panic("db: connectivity lost")
 }
 
 type txTimer struct {

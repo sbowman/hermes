@@ -65,6 +65,71 @@ be aggregated and used in a single transaction, as well as for testing.
         tx.Commit() 
     }
 
+Using a `hermes.Conn` parameter in a function also opens up *in situ* testing
+of database functionality.  You can create a transaction in the test case and
+pass it to a function that takes a `hermes.Conn`, run any tests on the results
+of that function, and simply let the transaction rollback at the end of the
+test to clean up.
+
+    var Conn hermes.Conn
+    
+    // We'll just open one database connection pool to speed up testing, so 
+    // we're not constantly opening and closing connections.
+    func TestMain(m *testing.M) {
+	    conn, err := hermes.Connect("postgres", DBTestURI, 5, 2)
+	    if err != nil {
+	        fmt.Fprintf(os.Stderr, "Unable to open a database connection: %s\n", err)
+	        os.Exit(1)
+    	}
+    	defer conn.Close()
+    	
+    	Conn = conn
+    	
+    	os.Exit(m.Run())
+    }
+    
+    // Test getting a user account from the database.  The signature for the
+    // function is:  `func GetUser(conn hermes.Conn, email string) (User, error)`
+    // 
+    // Passing a hermes.Conn value to the function means we can pass in either
+    // a reference to the database pool and really update the data, or we can
+    // pass in the same transaction reference to both the SaveUser and GetUser
+    // functions.  If we use a transaction, we can let the transaction roll back 
+    // after we test these functions, or at any failure point in the test case,
+    // and we know the data is cleaned up. 
+    func TestGetUser(t *testing.T) {
+        u := User{
+            Email: "jdoe@nowhere.com",
+            Name: "John Doe",
+        }
+        
+        tx, err := Conn.Begin()
+        if err != nil {
+            t.Fatal(err)
+        }
+        defer tx.Close()
+        
+        if err := db.SaveUser(tx, u); err != nil {
+            t.Fatalf("Unable to create a new user account: %s", err)
+        }
+        
+        check, err := db.GetUser(tx, u.Email)
+        if err != nil {
+            t.Fatalf("Failed to get user by email address: %s", err)
+        }
+        
+        if check.Email != u.Email {
+            t.Errorf("Expected user email to be %s; was %s", u.Email, check.Email)
+        } 
+        
+        if check.Name != u.Name {
+            t.Errorf("Expected user name to be %s; was %s", u.Name, check.Name)
+        } 
+        
+        // Note:  do nothing...when the test case ends, the `defer tx.Close()`
+        // is called, and all the data in this transaction is rolled back out.
+    }
+     
 ## Savepoints (1.2.4)
 
 Hermes 1.2.4 adds support for transaction "savepoints."  A savepoint acts like a
@@ -132,6 +197,63 @@ Using transactions, even if a test case fails a returns prematurely, the
 database transaction is automatically closed, thanks to defer.  The database 
 is cleaned up without any fuss or need to remember to delete the data you
 created at any point in the test. 
+
+For example:
+
+    // Test uniqueness when saving users.  Based off the example above.  Both
+    // `User.Email` and `User.Name` must be unique. 
+    func TestUserUniquness(t *testing.T) {
+        u := User{
+            Email: "jdoe@nowhere.com",
+            Name: "John Doe",
+        }
+        
+        tx, err := Conn.Begin()
+        if err != nil {
+            t.Fatal(err)
+        }
+        defer tx.Close()
+        
+        // Create our valid user account
+        if err := db.SaveUser(tx, u); err != nil {
+            t.Fatalf("Unable to create a new user account: %s", err)
+        }
+        
+        // Leave a savepoint to rollback to
+        savepoint, err := tx.Savepoint()
+        if err != nil {
+            t.Fatalf("Couldn't create a savepoint: %s", err)
+        }
+        
+        // Test email uniquness
+        other := User{
+            Email: "jdoe@nowhere.com,
+            Name: "Another name",
+        }
+        
+        if err = db.SaveUser(tx, other); err == nil {
+            t.Error("Appears that user emails lack a uniqueness constraint in the database")
+        }
+        
+        // Just to be safe, rollback to our valid user and try the name
+        if err = tx.RollbackTo(savepoint); err != nil {
+            t.Fatalf("Unable to rollback to savepoint: %s", err)
+        }
+        
+        // Test name uniqueness
+        other = User{
+            Email: "another@nowhere.com",
+            Name: "John Doe",
+        }
+
+        if err = db.SaveUser(tx, other); err == nil {
+            t.Error("Appears that user names lack a uniqueness constraint in the database")
+        }
+
+        // Again, let the test case end and allow `defer tx.Close()` to wipe all
+        // the data and savepoints created by the transaction; no need for any
+        // delete calls.        
+    }
 
 ### Additional information
 

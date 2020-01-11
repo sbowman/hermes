@@ -129,143 +129,12 @@ test to clean up.
         // Note:  do nothing...when the test case ends, the `defer tx.Close()`
         // is called, and all the data in this transaction is rolled back out.
     }
-     
-## Savepoints (1.2.4)
-
-Hermes 1.2.4 adds support for transaction "savepoints."  A savepoint acts like a
-bookmark in a transaction that stays around until the transaction ends.  It 
-allows a transaction to partially rollback to the savepoint.  
-
-At any point in a transaction, use `Conn.Savepoint` to create a savepoint in the 
-transaction.  The savepoint is assigned a random identifer, which is the 
-returned by the `Conn.Savepoint` function.  When you wish to rollback to this 
-savepoint, call `Conn.RollbackTo(savepointID)`.  
-
-For example:
-
-    tx, err := db.Begin()
-    if err != nil {
-        return err
-    }
-    defer tx.Close()
     
-    // ... do some work ...
-    
-    savepoint, err := tx.Savepoint
-    if err != nil {
-        // If the savepoint can't be created, rollback the entire transaction
-        return err
-    }
-    
-    // ... do additional work ...
-    
-    // Whoops!  Something went wrong in the additional work!
-    //
-    // Also note that RollbackTo does return an error, which you should probably
-    // catch.
-    tx.RollbackTo(savepoint)
-    
-    // Continue working; the transaction is still valid; we just lost the 
-    // additional work.
-
-Savepoints remain valid once created.  You can create a savepoint, rollback to
-the savepoint, do more work, and rollback to the savepoint again.
-
-Cursors created before a savepoint are unaffected by a rollback to the 
-savepoint, even if they have been manipulated after the savepoint was created.
-Cursors created after a savepoint are closed when the savepoint is rolled back.
-See the documentation below for more details.  
-
-While `Savepoint()` and `RollbackTo()` are part of the `hermes.Conn` interface,
-when called on a `hermes.DB` object they do nothing.
-
-Savepoints have only been tested with PostgreSQL, though they should also work
-with MySQL.  
-
-### Usages
-
-Savepoints can be very useful for database testing.  For example, you can create
-a Hermes transaction (`hermes.Tx`) at the start of a test case containing 
-multiple scenarios, setup your initial data, then create a savepoint before each 
-scenario you're testing.  
-
-After each scenario, simply rollback to the savepoint and test the next scenario.  
-At the end of the test case, allow the transaction to close (`defer tx.Close()`) 
-and rollback all the data, leaving the database in a pristine state.  
-
 Using transactions, even if a test case fails a returns prematurely, the 
-database transaction is automatically closed, thanks to defer.  The database 
+database transaction is automatically closed, thanks to `defer`.  The database 
 is cleaned up without any fuss or need to remember to delete the data you
 created at any point in the test. 
-
-For example:
-
-    // Test uniqueness when saving users.  Based off the example above.  Both
-    // `User.Email` and `User.Name` must be unique. 
-    func TestUserUniquness(t *testing.T) {
-        u := User{
-            Email: "jdoe@nowhere.com",
-            Name: "John Doe",
-        }
-        
-        tx, err := Conn.Begin()
-        if err != nil {
-            t.Fatal(err)
-        }
-        defer tx.Close()
-        
-        // Create our valid user account
-        if err := db.SaveUser(tx, u); err != nil {
-            t.Fatalf("Unable to create a new user account: %s", err)
-        }
-        
-        // Leave a savepoint to rollback to
-        savepoint, err := tx.Savepoint()
-        if err != nil {
-            t.Fatalf("Couldn't create a savepoint: %s", err)
-        }
-        
-        // Test email uniquness
-        other := User{
-            Email: "jdoe@nowhere.com,
-            Name: "Another name",
-        }
-        
-        if err = db.SaveUser(tx, other); err == nil {
-            t.Error("Appears that user emails lack a uniqueness constraint in the database")
-        }
-        
-        // Just to be safe, rollback to our valid user and try the name
-        if err = tx.RollbackTo(savepoint); err != nil {
-            t.Fatalf("Unable to rollback to savepoint: %s", err)
-        }
-        
-        // Test name uniqueness
-        other = User{
-            Email: "another@nowhere.com",
-            Name: "John Doe",
-        }
-
-        if err = db.SaveUser(tx, other); err == nil {
-            t.Error("Appears that user names lack a uniqueness constraint in the database")
-        }
-
-        // Again, let the test case end and allow `defer tx.Close()` to wipe all
-        // the data and savepoints created by the transaction; no need for any
-        // delete calls.        
-    }
-
-### Additional information
-
-For more information on savepoints, see the PostgreSQL documentation:
-
-* https://www.postgresql.org/docs/12/sql-savepoint.html
-* https://www.postgresql.org/docs/12/sql-rollback-to.html
-
-Or the MySQL documentation:
-
-* https://dev.mysql.com/doc/refman/8.0/en/savepoint.html
-
+  
 ## Confirm (1.2.3)
 
 If the network environment is unstable, Hermes may be configured to retry 
@@ -387,6 +256,139 @@ You may disable transaction timers using the `hermes.DisableTimeouts()` call.
 **Do not run transaction timers in production!** There is overhead with the
 timers enabled; enabling them in production could cause performance and memory
 issues under load (each transaction will get a time.Timer).
+
+## Savepoints (1.2.4)
+
+Hermes 1.2.4 adds support for transaction "savepoints."  A savepoint acts like a
+bookmark in a transaction that stays around until the transaction ends.  It 
+allows a transaction to partially rollback to the savepoint.  
+
+At any point in a transaction, use `Conn.Savepoint` to create a savepoint in the 
+transaction.  The savepoint is assigned a random identifer, which is the 
+returned by the `Conn.Savepoint` function.  When you wish to rollback to this 
+savepoint, call `Conn.RollbackTo(savepointID)`.  
+
+For example:
+
+    tx, err := db.Begin()
+    if err != nil {
+        return err
+    }
+    defer tx.Close()
+    
+    // ... do some work ...
+    
+    savepoint, err := tx.Savepoint
+    if err != nil {
+        // If the savepoint can't be created, rollback the entire transaction
+        return err
+    }
+    
+    // ... do additional work ...
+    
+    // Whoops!  Something went wrong in the additional work!
+    //
+    // Also note that RollbackTo does return an error, which you should probably
+    // catch.
+    tx.RollbackTo(savepoint)
+    
+    // Continue working; the transaction is still valid, but we just lost the 
+    // additional work.
+
+Savepoints remain valid once created.  You can create a savepoint, rollback to
+the savepoint, do more work, and rollback to the savepoint again.
+
+Cursors created before a savepoint are unaffected by a rollback to the 
+savepoint, even if they have been manipulated after the savepoint was created.
+Cursors created after a savepoint are closed when the savepoint is rolled back.
+See the documentation below for more details.  
+
+While `Savepoint()` and `RollbackTo()` are part of the `hermes.Conn` interface,
+when called on a `hermes.DB` object they do nothing.
+
+Savepoints have only been tested with PostgreSQL, though they should also work
+with MySQL.  
+
+### Usages
+
+Savepoints can be very useful for database testing.  For example, you can create
+a Hermes transaction (`hermes.Tx`) at the start of a test case containing 
+multiple scenarios, setup your initial data, then create a savepoint before each 
+scenario you're testing.  
+
+After each scenario, simply rollback to the savepoint and test the next 
+scenario.  At the end of the test case, allow the transaction to close 
+(`defer tx.Close()`) and rollback all the data, leaving the database in a 
+pristine state.  
+
+
+For example:
+
+    // Test uniqueness when saving users.  Based off the example above.  Both
+    // `User.Email` and `User.Name` must be unique. 
+    func TestUserUniquness(t *testing.T) {
+        u := User{
+            Email: "jdoe@nowhere.com",
+            Name: "John Doe",
+        }
+        
+        tx, err := Conn.Begin()
+        if err != nil {
+            t.Fatal(err)
+        }
+        defer tx.Close()
+        
+        // Create our valid user account
+        if err := db.SaveUser(tx, u); err != nil {
+            t.Fatalf("Unable to create a new user account: %s", err)
+        }
+        
+        // Leave a savepoint to rollback to
+        savepoint, err := tx.Savepoint()
+        if err != nil {
+            t.Fatalf("Couldn't create a savepoint: %s", err)
+        }
+        
+        // Test email uniquness
+        other := User{
+            Email: "jdoe@nowhere.com,
+            Name: "Another name",
+        }
+        
+        if err = db.SaveUser(tx, other); err == nil {
+            t.Error("Appears that user emails lack a uniqueness constraint in the database")
+        }
+        
+        // Just to be safe, rollback to our valid user and try the name
+        if err = tx.RollbackTo(savepoint); err != nil {
+            t.Fatalf("Unable to rollback to savepoint: %s", err)
+        }
+        
+        // Test name uniqueness
+        other = User{
+            Email: "another@nowhere.com",
+            Name: "John Doe",
+        }
+
+        if err = db.SaveUser(tx, other); err == nil {
+            t.Error("Appears that user names lack a uniqueness constraint in the database")
+        }
+
+        // Again, let the test case end and allow `defer tx.Close()` to wipe all
+        // the data and savepoints created by the transaction; no need for any
+        // delete calls.        
+    }
+
+### Additional information
+
+For more information on savepoints, see the PostgreSQL documentation:
+
+* https://www.postgresql.org/docs/12/sql-savepoint.html
+* https://www.postgresql.org/docs/12/sql-rollback-to.html
+
+Or the MySQL documentation:
+
+* https://dev.mysql.com/doc/refman/8.0/en/savepoint.html
 
 ## Testing
 

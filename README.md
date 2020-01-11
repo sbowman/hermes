@@ -1,4 +1,4 @@
-# Hermes 1.2.3
+# Hermes 1.2.4
 
 Hermes wraps the `jmoiron/sqlx` *sqlx.DB and *sqlx.Tx models in a common 
 interface, hermes.Conn.  Makes it easier to build small functions that can
@@ -64,6 +64,85 @@ be aggregated and used in a single transaction, as well as for testing.
         // "defer tx.Close()" above!
         tx.Commit() 
     }
+
+## Savepoints (1.2.4)
+
+Hermes 1.2.4 adds support for transaction "savepoints."  A savepoint acts like a
+bookmark in a transaction that stays around until the transaction ends.  It 
+allows a transaction to partially rollback to the savepoint.  
+
+At any point in a transaction, use `Conn.Savepoint` to create a savepoint in the 
+transaction.  The savepoint is assigned a random identifer, which is the 
+returned by the `Conn.Savepoint` function.  When you wish to rollback to this 
+savepoint, call `Conn.RollbackTo(savepointID)`.  
+
+For example:
+
+    tx, err := db.Begin()
+    if err != nil {
+        return err
+    }
+    defer tx.Close()
+    
+    // ... do some work ...
+    
+    savepoint, err := tx.Savepoint
+    if err != nil {
+        // If the savepoint can't be created, rollback the entire transaction
+        return err
+    }
+    
+    // ... do additional work ...
+    
+    // Whoops!  Something went wrong in the additional work!
+    //
+    // Also note that RollbackTo does return an error, which you should probably
+    // catch.
+    tx.RollbackTo(savepoint)
+    
+    // Continue working; the transaction is still valid; we just lost the 
+    // additional work.
+
+Savepoints remain valid once created.  You can create a savepoint, rollback to
+the savepoint, do more work, and rollback to the savepoint again.
+
+Cursors created before a savepoint are unaffected by a rollback to the 
+savepoint, even if they have been manipulated after the savepoint was created.
+Cursors created after a savepoint are closed when the savepoint is rolled back.
+See the documentation below for more details.  
+
+While `Savepoint()` and `RollbackTo()` are part of the `hermes.Conn` interface,
+when called on a `hermes.DB` object they do nothing.
+
+Savepoints have only been tested with PostgreSQL, though they should also work
+with MySQL.  
+
+### Usages
+
+Savepoints can be very useful for database testing.  For example, you can create
+a Hermes transaction (`hermes.Tx`) at the start of a test case containing 
+multiple scenarios, setup your initial data, then create a savepoint before each 
+scenario you're testing.  
+
+After each scenario, simply rollback to the savepoint and test the next scenario.  
+At the end of the test case, allow the transaction to close (`defer tx.Close()`) 
+and rollback all the data, leaving the database in a pristine state.  
+
+Using transactions, even if a test case fails a returns prematurely, the 
+database transaction is automatically closed, thanks to defer.  The database 
+is cleaned up without any fuss or need to remember to delete the data you
+created at any point in the test. 
+
+### Additional information
+
+For more information on savepoints, see the PostgreSQL documentation:
+
+* https://www.postgresql.org/docs/12/sql-savepoint.html
+* https://www.postgresql.org/docs/12/sql-rollback-to.html
+
+Or the MySQL documentation:
+
+* https://dev.mysql.com/doc/refman/8.0/en/savepoint.html
 
 ## Confirm (1.2.3)
 

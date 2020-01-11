@@ -111,6 +111,13 @@ type Conn interface {
 
 	// The data source name for this connection
 	Name() string
+
+	// Savepoint creates a savepoint in a transaction.  On a database
+	// connection does nothing.
+	Savepoint() (string, error)
+
+	// RollbackTo a savepoint ID.  On a database connection does nothing.
+	RollbackTo(savepointID string) error
 }
 
 // Connect opens a connection to the database and pings it.

@@ -1,7 +1,6 @@
 package hermes_test
 
 import (
-	"fmt"
 	"testing"
 )
 
@@ -10,7 +9,6 @@ func TestSavepoint(t *testing.T) {
 	db := connect(t)
 	defer db.Close()
 
-	fmt.Println("here")
 	tx, err := db.Begin()
 	if err != nil {
 		t.Fatal(err)

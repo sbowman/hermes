@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"sync"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -30,8 +29,6 @@ const (
 
 // Tx wraps a sqlx.Tx transaction.  Tracks context.
 type Tx struct {
-	sync.Mutex
-
 	db       *DB
 	ctx      context.Context
 	internal *sqlx.Tx
@@ -61,9 +58,6 @@ func (tx *Tx) Context() context.Context {
 // Begin a new transaction.  Returns a Conn wrapping the transaction
 // (*sqlx.Tx).
 func (tx *Tx) Begin() (Conn, error) {
-	tx.Lock()
-	defer tx.Unlock()
-
 	if tx.rollback {
 		return nil, ErrTxRolledBack
 	}
@@ -75,9 +69,6 @@ func (tx *Tx) Begin() (Conn, error) {
 // BeginCtx begins a new transaction in context.  The Conn will have the context
 // associated with it and use it for all subsequent commands.
 func (tx *Tx) BeginCtx(ctx context.Context) (Conn, error) {
-	tx.Lock()
-	defer tx.Unlock()
-
 	if tx.rollback {
 		return nil, ErrTxRolledBack
 	}
@@ -94,9 +85,6 @@ func (tx *Tx) BeginCtx(ctx context.Context) (Conn, error) {
 
 // Exec executes a database statement with no results..
 func (tx *Tx) Exec(query string, args ...interface{}) (sql.Result, error) {
-	tx.Lock()
-	defer tx.Unlock()
-
 	if err := tx.ok(); err != nil {
 		return nil, err
 	}
@@ -115,9 +103,6 @@ func (tx *Tx) Exec(query string, args ...interface{}) (sql.Result, error) {
 
 // Query the database.
 func (tx *Tx) Query(query string, args ...interface{}) (*sqlx.Rows, error) {
-	tx.Lock()
-	defer tx.Unlock()
-
 	if err := tx.ok(); err != nil {
 		return nil, err
 	}
@@ -136,9 +121,6 @@ func (tx *Tx) Query(query string, args ...interface{}) (*sqlx.Rows, error) {
 
 // Row queries the databsae for a single row.
 func (tx *Tx) Row(query string, args ...interface{}) (*sqlx.Row, error) {
-	tx.Lock()
-	defer tx.Unlock()
-
 	if err := tx.ok(); err != nil {
 		return nil, err
 	}
@@ -160,9 +142,6 @@ func (tx *Tx) Row(query string, args ...interface{}) (*sqlx.Row, error) {
 
 // Prepare a database query.
 func (tx *Tx) Prepare(query string) (*sqlx.Stmt, error) {
-	tx.Lock()
-	defer tx.Unlock()
-
 	if err := tx.ok(); err != nil {
 		return nil, err
 	}
@@ -179,9 +158,6 @@ func (tx *Tx) Prepare(query string) (*sqlx.Stmt, error) {
 
 // Get a single record from the database, e.g. "SELECT ... LIMIT 1".
 func (tx *Tx) Get(dest interface{}, query string, args ...interface{}) error {
-	tx.Lock()
-	defer tx.Unlock()
-
 	if err := tx.ok(); err != nil {
 		return err
 	}
@@ -195,9 +171,6 @@ func (tx *Tx) Get(dest interface{}, query string, args ...interface{}) error {
 
 // Select a collection record from the database.
 func (tx *Tx) Select(dest interface{}, query string, args ...interface{}) error {
-	tx.Lock()
-	defer tx.Unlock()
-
 	if err := tx.ok(); err != nil {
 		return err
 	}
@@ -212,9 +185,6 @@ func (tx *Tx) Select(dest interface{}, query string, args ...interface{}) error 
 // Commit the current transaction.  Returns ErrTxRolledBack if the transaction
 // was already rolled back, or ErrTxCommitted if it was committed.
 func (tx *Tx) Commit() error {
-	tx.Lock()
-	defer tx.Unlock()
-
 	if tx.rollback {
 		return ErrTxRolledBack
 	}
@@ -237,9 +207,6 @@ func (tx *Tx) Commit() error {
 // Rollback the transaction.  Ignored if the transaction is already in a
 // rollback.  Returns ErrTxCommitted if the transaction was committed.
 func (tx *Tx) Rollback() error {
-	tx.Lock()
-	defer tx.Unlock()
-
 	if tx.rollback {
 		return nil
 	}
@@ -261,9 +228,6 @@ func (tx *Tx) Rollback() error {
 
 // Close will automatically rollback a transaction if it hasn't been committed.
 func (tx *Tx) Close() error {
-	tx.Lock()
-	defer tx.Unlock()
-
 	if tx.current == _rollback || tx.current == _commit {
 		tx.pop()
 		return nil

@@ -235,6 +235,12 @@ func (tx *Tx) Close() error {
 
 	if err := tx.internal.Rollback(); err != nil {
 		tx.pop()
+
+		if err == sql.ErrTxDone {
+			tx.current = _rollback
+			return nil
+		}
+
 		return tx.check(err)
 	}
 

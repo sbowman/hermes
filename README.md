@@ -1,4 +1,4 @@
-# Hermes 1.2.4
+# Hermes 1.2.5
 
 Hermes wraps the `jmoiron/sqlx` *sqlx.DB and *sqlx.Tx models in a common 
 interface, hermes.Conn.  Makes it easier to build small functions that can
